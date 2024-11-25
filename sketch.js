@@ -1,113 +1,177 @@
 let data;
 let dataRows;
+let glyphs = [];
+let riverCanvas;
+let tooltip;
 
-// Colori
-let pageColor = "white";
-let rectColor = "darkblue";
-let textColor = "black";
-
-// Dimensioni e padding
-let padding = 80;
-let baseWidth = 60;
-let titlePadding = 100; // Spazio extra per il titolo
+const CONFIG = {
+  pageColor: "#f4f4f4",
+  rectColor: "#1a4b84",
+  textColor: "#333",
+  padding: 20,
+  baseWidth: 5,
+  titlePadding: 60,
+  spacing: 10, // Spaziatura tra i rettangoli
+  itemHeight: 30, // Altezza base dei rettangoli
+  captionSpacing: 60, // Spazio tra il titolo e la didascalia
+  captionWidth: 0.8, // Larghezza relativa della didascalia (percentuale della canvas)
+};
 
 function preload() {
   data = loadTable("assets/data.csv", "csv", "header");
+  tooltip = createDiv('')
+    .position(0, 0)
+    .style('display', 'none')
+    .style('position', 'absolute')
+    .style('background-color', '#fff')
+    .style('border', `1px solid ${CONFIG.rectColor}`)
+    .style('border-radius', '5px')
+    .style('padding', '10px')
+    .style('font-size', '12px')
+    .style('z-index', '10');
 }
 
 function setup() {
-  dataRows = data.getRows();
-  dataRows.sort((a, b) => b.getNum("length") - a.getNum("length")); 
+  dataRows = data.getRows()
+    .sort((a, b) => b.getNum("length") - a.getNum("length"))
+    .filter(row => row.getString("name") && row.getNum("length") && row.getNum("area"));
 
-  // Calcolo responsive di totalHeight con spazio per titolo e descrizione
-  let itemHeight = 80;
-  let spacing = padding;
-  let totalHeight = titlePadding + (itemHeight + spacing) * dataRows.length + padding * 3 + 200; // Extra spazio per la descrizione
-  
-  totalHeight = max(totalHeight, windowHeight);
+  let totalHeight = (10 + 20) * dataRows.length + CONFIG.titlePadding; 
   
   createCanvas(windowWidth, totalHeight);
-  background(pageColor);
+  riverCanvas = createGraphics(width, height);
+  renderVisualization();
+}
 
-  // Aggiungi il titolo
-  textSize(36);
-  textStyle(BOLD);
-  textAlign(CENTER, CENTER);
-  fill(textColor);
-  text("I 100 FIUMI PIÙ LUNGHI DEL MONDO", windowWidth/2, titlePadding/2);
+function renderVisualization() {
+  const maxArea = max(dataRows.map(row => row.getNum("area")));
+  const maxLength = max(dataRows.map(row => row.getNum("length")));
 
-  let xPos = windowWidth / 2;
-  let yPos = titlePadding; // Inizia dopo il titolo
+  glyphs = [];
+  let xPos = width / 2; // Centro della canvas per i rettangoli
+  let yPos = CONFIG.titlePadding + CONFIG.captionSpacing + 40; // Spazio dopo la didascalia
 
-  // Trova i valori massimi e minimi
-  let maxArea = 0;
-  let minArea = Infinity;
-  let maxLength = 0;
-  let minLength = Infinity;
-  
-  for (let row of dataRows) {
-    let area = row.getNum("area");
-    let length = row.getNum("length");
-    maxArea = max(maxArea, area);
-    minArea = min(minArea, area);
-    maxLength = max(maxLength, length);
-    minLength = min(minLength, length);
-  }
+  dataRows.forEach((item, i) => {
+    const normalizedArea = pow(item.getNum("area") / maxArea, 0.7);
+    const normalizedLength = item.getNum("length") / maxLength;
 
-  // Usa una scala mista per bilanciare le differenze
-  for (let i = 0; i < dataRows.length; i++) {
-    let item = dataRows[i];
-    let name = item.getString("name");
-    let length = item.getNum("length");
-    let area = item.getNum("area");
+    const glyph = new Glyph(
+      xPos,
+      yPos,
+      item.getString("name"),
+      normalizedLength,
+      normalizedArea,
+      width,
+      {
+        length: item.getNum("length"),
+        area: item.getNum("area"),
+      }
+    );
 
-    if (name && length && area) {
-      let normalizedArea = pow(area / maxArea, 0.7);
-      let normalizedLength = length / maxLength;
-      
-      drawGlyph(xPos, yPos, name, normalizedLength, normalizedArea, maxLength);
-      yPos += itemHeight + spacing;
-    } else {
-      console.log(`Dati mancanti per la riga ${i + 1}`);
+    glyphs.push(glyph);
+    yPos += glyph.height + CONFIG.spacing; // Incrementa la posizione verticale
+  });
+
+  renderGraphics();
+}
+
+function renderGraphics() {
+  riverCanvas.clear();
+  riverCanvas.background(CONFIG.pageColor);
+
+  // Titolo
+  riverCanvas.textSize(28);
+  riverCanvas.textStyle(BOLD);
+  riverCanvas.textAlign(CENTER, TOP);
+  riverCanvas.fill(CONFIG.textColor);
+  riverCanvas.text("TOP 100 RIVERS", width / 2, CONFIG.padding);
+
+  // Didascalia sotto il titolo
+  const captionY = CONFIG.titlePadding; // Posizione sotto il titolo
+  const captionWidth = width * CONFIG.captionWidth;
+  riverCanvas.textSize(16);
+  riverCanvas.textStyle(NORMAL);
+  riverCanvas.textAlign(CENTER, TOP);
+  riverCanvas.fill(CONFIG.textColor);
+  const explanation = "Each rectangle represents a river. The height indicates the length, while the width represents the basin area. Hover over a rectangle to see the details.";
+  riverCanvas.text(explanation, (width - captionWidth) / 2, captionY, captionWidth);
+
+  // Disegna i rettangoli dei fiumi
+  glyphs.forEach(glyph => glyph.render(riverCanvas, false));
+
+  image(riverCanvas, 0, 0);
+}
+
+function draw() {
+  image(riverCanvas, 0, 0);
+
+  // Identifica se il mouse è sopra uno dei rettangoli
+  let hoveredGlyph = null;
+  glyphs.forEach(glyph => {
+    if (glyph.isHovered()) {
+      hoveredGlyph = glyph;
     }
+  });
+
+  // Disegna i rettangoli e cambia colore se è hovered
+  glyphs.forEach(glyph => {
+    const isHovered = hoveredGlyph === glyph;
+    glyph.render(riverCanvas, isHovered);
+  });
+
+  // Se un rettangolo è hovered, mostriamo la tooltip
+  if (hoveredGlyph) {
+    hoveredGlyph.renderTooltip();
+  } else {
+    tooltip.style('display', 'none');
+  }
+}
+
+class Glyph {
+  constructor(x, y, name, normalizedLength, normalizedArea, canvasWidth, details) {
+    this.x = x;
+    this.y = y;
+    this.name = name;
+    this.details = details;
+
+    const maxRectWidth = canvasWidth * 0.7;
+    const maxRectHeight = CONFIG.itemHeight;
+
+    this.width = map(normalizedArea, 0, 1, CONFIG.baseWidth, maxRectWidth);
+    this.height = map(normalizedLength, 0, 1, 10, maxRectHeight);
   }
 
-  // Aggiungi la descrizione alla fine
-  textSize(20);
-  textStyle(NORMAL);
-  textAlign(CENTER, TOP);
-  fill(textColor);
-  let description = "Questa visualizzazione rappresenta i 100 fiumi più lunghi del mondo. " +
-                   "La larghezza di ogni rettangolo è proporzionale all'area del bacino del fiume, " +
-                   "mentre l'altezza è proporzionale alla sua lunghezza. " +
-                   "I fiumi sono ordinati dal più lungo al più corto, offrendo una prospettiva " +
-                   "immediata sulla loro grandezza relativa e sull'impatto dei loro bacini idrografici.";
-  
-  let descriptionY = yPos + padding;
-  text(description, windowWidth/2 - windowWidth/4, descriptionY, windowWidth/2, 200);
+  render(canvas, isHovered) {
+    canvas.push();
+    // Cambia il colore solo se il rettangolo è hovered
+    const fillColor = isHovered ? '#000035' : CONFIG.rectColor;
+    canvas.fill(fillColor);
+    canvas.noStroke();
+    canvas.rectMode(CENTER);
+    canvas.rect(this.x, this.y, this.width, this.height);
+    canvas.pop();
+  }
+
+  isHovered() {
+    return (
+      mouseX >= this.x - this.width / 2 &&
+      mouseX <= this.x + this.width / 2 &&
+      mouseY >= this.y - this.height / 2 &&
+      mouseY <= this.y + this.height / 2
+    );
+  }
+
+  renderTooltip() {
+    tooltip.html(`
+      <strong>${this.name}</strong><br>
+      Lunghezza: ${this.details.length} km<br>
+      Area bacino: ${this.details.area} km²
+    `);
+    tooltip.position(mouseX + 10, mouseY);
+    tooltip.style('display', 'block');
+  }
 }
 
 function windowResized() {
   setup();
-}
-
-function draw() {
-  // La funzione draw è vuota perché il disegno è gestito in setup
-}
-
-function drawGlyph(x, y, name, normalizedLength, normalizedArea, maxLength) {
-  let maxRectWidth = windowWidth * 0.9 ;
-  let maxRectHeight = 120; // Aumentata l'altezza massima dei rettangoli
-  
-  let rectWidth = map(normalizedArea, 0, 1, baseWidth, maxRectWidth);
-  let rectHeight = map(normalizedLength, 0, 1, 30, maxRectHeight); // Aumentata anche l'altezza minima
-
-  fill(rectColor);
-  noStroke();
-  rect(x - rectWidth / 2, y, rectWidth, rectHeight);
-
-  fill(textColor);
-  textAlign(CENTER, CENTER);
-  textSize(18);
-  text(name, x, y + rectHeight + 15);
 }
